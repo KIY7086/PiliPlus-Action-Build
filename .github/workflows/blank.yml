@@ -16,99 +16,50 @@ jobs:
       - name: Clone PiliPlus
         run: |
           git clone --depth=1 https://github.com/bggRGjQaUbCoE/PiliPlus.git
-          echo "✅ 克隆完成"
 
-      # ══════════════════════════════════════════
-      # 关键步骤：精准替换包名
-      # ══════════════════════════════════════════
       - name: Replace package name
         run: |
           cd PiliPlus
+          OLD_PKG="com.example.piliplus"
           NEW_PKG="tv.danmaku.bili"
+          GRADLE_FILE="android/app/build.gradle.kts"
 
-          # ── 第一步：自动探测真实旧包名（从 build.gradle 读取）──
-          OLD_PKG=$(grep -r "applicationId" android/app/build.gradle \
-            | grep -oP '(?<=")([\w.]+)(?=")' | head -1)
+          echo "🔄 replacing: $OLD_PKG → $NEW_PKG"
 
-          # 如果没读到就用已知默认值兜底
-          if [ -z "$OLD_PKG" ]; then
-            OLD_PKG="com.example.piliplus"
-          fi
+          sed -i \
+            -e "s|applicationId = \"$OLD_PKG\"|applicationId = \"$NEW_PKG\"|g" \
+            -e "s|namespace = \"$OLD_PKG\"|namespace = \"$NEW_PKG\"|g" \
+            "$GRADLE_FILE"
 
-          echo "🔍 探测到旧包名: $OLD_PKG"
-          echo "🔄 替换为: $NEW_PKG"
-
-          # ── 第二步：替换 build.gradle 里的 applicationId 和 namespace ──
-          sed -i "s|applicationId \"$OLD_PKG\"|applicationId \"$NEW_PKG\"|g" \
-            android/app/build.gradle
-          sed -i "s|namespace \"$OLD_PKG\"|namespace \"$NEW_PKG\"|g" \
-            android/app/build.gradle
-          # 兼容 = 号写法（新版 Gradle）
-          sed -i "s|applicationId = \"$OLD_PKG\"|applicationId = \"$NEW_PKG\"|g" \
-            android/app/build.gradle
-          sed -i "s|namespace = \"$OLD_PKG\"|namespace = \"$NEW_PKG\"|g" \
-            android/app/build.gradle
-
-          echo "✅ build.gradle 替换完成:"
-          grep -E "applicationId|namespace" android/app/build.gradle || true
-
-          # ── 第三步：替换 AndroidManifest.xml ──
           find android -name "AndroidManifest.xml" \
             -exec sed -i "s|$OLD_PKG|$NEW_PKG|g" {} \;
-          echo "✅ AndroidManifest 替换完成"
 
-          # ── 第四步：替换 Kotlin/Java 源码中的 package 声明 ──
-          find android -name "*.kt" -o -name "*.java" | \
-            xargs -r sed -i "s|package $OLD_PKG|package $NEW_PKG|g"
-          find android -name "*.kt" -o -name "*.java" | \
-            xargs -r sed -i "s|import $OLD_PKG|import $NEW_PKG|g"
-          echo "✅ Kotlin/Java 源码替换完成"
+          find android \( -name "*.kt" -o -name "*.java" \) \
+            | xargs -r sed -i \
+                -e "s|package $OLD_PKG|package $NEW_PKG|g" \
+                -e "s|import $OLD_PKG|import $NEW_PKG|g"
 
-          # ── 第五步：移动 Kotlin 源码目录结构 ──
-          # 把 com/orz12/PiliPalaX → tv/danmaku/bili
           OLD_PATH=$(echo "$OLD_PKG" | tr '.' '/')
           NEW_PATH=$(echo "$NEW_PKG" | tr '.' '/')
-
           for SRC_ROOT in \
-            android/app/src/main/kotlin \
-            android/app/src/debug/kotlin \
-            android/app/src/profile/kotlin; do
-            if [ -d "$SRC_ROOT/$OLD_PATH" ]; then
-              echo "📁 移动目录: $SRC_ROOT/$OLD_PATH → $SRC_ROOT/$NEW_PATH"
-              mkdir -p "$SRC_ROOT/$NEW_PATH"
-              mv "$SRC_ROOT/$OLD_PATH/"* "$SRC_ROOT/$NEW_PATH/" 2>/dev/null || true
-              # 删除旧的空目录
-              rm -rf "$SRC_ROOT/$(echo $OLD_PKG | cut -d. -f1)"
-            fi
-          done
-
-          # 同样处理 java 目录（有的 Flutter 项目用 java 不用 kotlin）
-          for SRC_ROOT in \
-            android/app/src/main/java \
-            android/app/src/debug/java \
-            android/app/src/profile/java; do
+              android/app/src/main/kotlin \
+              android/app/src/main/java \
+              android/app/src/debug/kotlin \
+              android/app/src/debug/java; do
             if [ -d "$SRC_ROOT/$OLD_PATH" ]; then
               mkdir -p "$SRC_ROOT/$NEW_PATH"
               mv "$SRC_ROOT/$OLD_PATH/"* "$SRC_ROOT/$NEW_PATH/" 2>/dev/null || true
-              rm -rf "$SRC_ROOT/$(echo $OLD_PKG | cut -d. -f1)"
+              rm -rf "$SRC_ROOT/com"
             fi
           done
-          echo "✅ 目录结构迁移完成"
 
-          # ── 第六步：替换所有其他 xml 资源文件里的包名 ──
-          find android -name "*.xml" | \
-            xargs -r sed -i "s|$OLD_PKG|$NEW_PKG|g"
+          find android -name "*.xml" \
+            | xargs -r sed -i "s|$OLD_PKG|$NEW_PKG|g"
 
-          # ── 第七步：替换 pubspec.yaml ──
           sed -i "s|$OLD_PKG|$NEW_PKG|g" pubspec.yaml
 
-          echo ""
-          echo "══════════ 验证替换结果 ══════════"
-          echo "build.gradle applicationId:"
-          grep "applicationId" android/app/build.gradle || true
-          echo "AndroidManifest package:"
-          grep "package=" android/app/src/main/AndroidManifest.xml || true
-          echo "=========================================="
+          echo "✅ result:"
+          grep -E "applicationId|namespace" "$GRADLE_FILE"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -128,7 +79,7 @@ jobs:
           cd PiliPlus
           flutter pub get
 
-      - name: Build APK (arm64)
+      - name: Build APK
         run: |
           cd PiliPlus
           flutter build apk \
@@ -136,13 +87,12 @@ jobs:
             --target-platform android-arm64 \
             --no-tree-shake-icons
 
-      - name: Verify package name in built APK
+      - name: Verify APK package name
         run: |
-          cd PiliPlus
-          # 用 aapt 确认 APK 里的包名
-          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | tail -1)/aapt \
-            dump badging build/app/outputs/flutter-apk/app-release.apk \
-            | grep "^package:" || true
+          AAPT=$(find $ANDROID_HOME/build-tools -name "aapt" | sort -V | tail -1)
+          $AAPT dump badging \
+            PiliPlus/build/app/outputs/flutter-apk/app-release.apk \
+            | grep "^package:"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -155,17 +105,16 @@ jobs:
         id: version
         run: |
           cd PiliPlus
-          VERSION=$(grep "^version:" pubspec.yaml | awk '{print $2}')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$(grep '^version:' pubspec.yaml | awk '{print $2}')" >> $GITHUB_OUTPUT
           echo "date=$(date +'%Y%m%d-%H%M')" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "build-${{ steps.version.outputs.date }}"
-          name: "PiliPlus ${{ steps.version.outputs.version }} | 包名 tv.danmaku.bili"
+          name: "PiliPlus ${{ steps.version.outputs.version }} | tv.danmaku.bili"
           body: |
-            🔧 自动构建 PiliPlus，包名已改为 `tv.danmaku.bili`
-            📦 上游版本：${{ steps.version.outputs.version }}
-            ⚠️ 安装前请先卸载官方哔哩哔哩（两者包名相同会冲突）
+            自动构建，包名已改为 `tv.danmaku.bili`
+            上游版本：${{ steps.version.outputs.version }}
+            ⚠️ 与官方哔哩哔哩包名相同，安装前请先卸载官方版本
           files: PiliPlus/build/app/outputs/flutter-apk/app-release.apk
