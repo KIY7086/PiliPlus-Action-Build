@@ -1,0 +1,108 @@
+name: Build PiliPlus with custom package name
+
+on:
+  workflow_dispatch:        # 手动点按钮触发
+  schedule:
+    - cron: '0 2 * * *'    # 每天北京时间早上6点自动检查更新
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取 PiliPlus 最新代码
+      - name: Clone PiliPlus
+        run: |
+          git clone --depth=1 https://github.com/bggRGjQaUbCoE/PiliPlus.git
+          echo "克隆完成"
+
+      # 2. 修改包名（Flutter 项目需要改多个地方）
+      - name: Replace package name
+        run: |
+          cd PiliPlus
+
+          OLD_PKG="com.orz12.PiliPalaX"
+          NEW_PKG="tv.danmaku.bili"
+
+          echo "开始替换包名：$OLD_PKG → $NEW_PKG"
+
+          # 替换 AndroidManifest.xml
+          find android -name "AndroidManifest.xml" \
+            -exec sed -i "s|$OLD_PKG|$NEW_PKG|g" {} \;
+
+          # 替换 build.gradle / build.gradle.kts
+          find android -name "*.gradle" -o -name "*.gradle.kts" | \
+            xargs sed -i "s|$OLD_PKG|$NEW_PKG|g"
+
+          # 替换 Kotlin/Java 源码中的 package 声明
+          find android -name "*.kt" -o -name "*.java" | \
+            xargs sed -i "s|$OLD_PKG|$NEW_PKG|g"
+
+          # 替换 pubspec.yaml（Flutter 应用 ID）
+          sed -i "s|$OLD_PKG|$NEW_PKG|g" pubspec.yaml
+
+          # 替换所有 xml 资源文件
+          find android -name "*.xml" | \
+            xargs sed -i "s|$OLD_PKG|$NEW_PKG|g"
+
+          echo "包名替换完成"
+          # 验证替换结果
+          grep -r "tv.danmaku.bili" android/app/src/main/AndroidManifest.xml || true
+
+      # 3. 安装 Java
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # 4. 安装 Flutter
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.0'   # 与 PiliPlus 要求一致
+          channel: 'stable'
+          cache: true
+
+      # 5. 安装依赖
+      - name: Flutter pub get
+        run: |
+          cd PiliPlus
+          flutter pub get
+
+      # 6. 编译 APK（arm64，覆盖 99% 现代手机）
+      - name: Build APK
+        run: |
+          cd PiliPlus
+          flutter build apk \
+            --release \
+            --target-platform android-arm64 \
+            --no-tree-shake-icons
+
+      # 7. 上传 APK 为 Artifact（可下载）
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PiliPlus-tv.danmaku.bili
+          path: PiliPlus/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+      # 8. （可选）同时发布为 Release，方便直接下载
+      - name: Get version info
+        id: version
+        run: |
+          cd PiliPlus
+          VERSION=$(grep "^version:" pubspec.yaml | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "build-${{ steps.version.outputs.date }}"
+          name: "PiliPlus ${{ steps.version.outputs.version }} (${{ steps.version.outputs.date }})"
+          body: |
+            自动构建 PiliPlus，包名已改为 tv.danmaku.bili
+            上游版本：${{ steps.version.outputs.version }}
+          files: PiliPlus/build/app/outputs/flutter-apk/app-release.apk
+          prerelease: false
