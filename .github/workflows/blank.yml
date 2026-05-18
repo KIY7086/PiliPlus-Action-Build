@@ -105,6 +105,31 @@ jobs:
           echo "✅ result:"
           grep -E "applicationId|namespace" "$GRADLE_FILE"
 
+      - name: Replace update URLs
+        run: |
+          cd PiliPlus
+
+          OLD_REPO="bggRGjQaUbCoE/PiliPlus"
+          NEW_REPO="KIY7086/PiliPlus-Action-Build"
+
+          echo "🔄 replacing GitHub URLs: $OLD_REPO → $NEW_REPO"
+
+          # Replace GitHub API endpoint for update checking (lib/http/api.dart)
+          sed -i \
+            "s|https://api.github.com/repos/$OLD_REPO/releases|https://api.github.com/repos/$NEW_REPO/releases|g" \
+            lib/http/api.dart
+
+          # Replace source code URL (lib/common/constants.dart)
+          sed -i \
+            "s|https://github.com/$OLD_REPO|https://github.com/$NEW_REPO|g" \
+            lib/common/constants.dart
+
+          # Also catch any other references (e.g. in scripts or comments)
+          grep -rl "$OLD_REPO" lib/ 2>/dev/null | \
+            xargs -r sed -i "s|$OLD_REPO|$NEW_REPO|g"
+
+          echo "✅ update URLs redirected to $NEW_REPO"
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -158,6 +183,7 @@ jobs:
           name: "PiliPlus ${{ steps.version.outputs.version }} | tv.danmaku.bili"
           body: |
             自动构建，包名已改为 `tv.danmaku.bili`
+            更新检测地址已重定向至本仓库
             上游版本：${{ steps.version.outputs.version }}
             上游 SHA：${{ needs.check.outputs.upstream_sha }}
             ⚠️ 与官方哔哩哔哩包名相同，安装前请先卸载官方版本
