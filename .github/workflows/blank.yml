@@ -9,7 +9,51 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.compare.outputs.should_build }}
+      upstream_sha: ${{ steps.compare.outputs.upstream_sha }}
+    steps:
+      - name: Check upstream commit
+        id: compare
+        run: |
+          UPSTREAM_SHA=$(git ls-remote https://github.com/bggRGjQaUbCoE/PiliPlus.git HEAD | cut -f1)
+          echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
+
+          LAST_SHA=""
+          if git ls-remote --exit-code --tags \
+              https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+              "last-built-sha" > /dev/null 2>&1; then
+            LAST_SHA=$(git ls-remote \
+              https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+              "refs/tags/last-built-sha" | cut -f1)
+            LAST_SHA=$(git ls-remote \
+              https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+              "refs/tags/last-built-sha" \
+              | awk '{print $1}')
+          fi
+
+          # Read stored SHA from a release tag message instead
+          STORED_SHA=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/last-built-sha" \
+            | jq -r '.body // ""' | tr -d '[:space:]')
+
+          echo "upstream: $UPSTREAM_SHA"
+          echo "stored:   $STORED_SHA"
+
+          if [ "$UPSTREAM_SHA" = "$STORED_SHA" ]; then
+            echo "✅ no new commits, skipping build"
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          else
+            echo "🆕 new commits detected, proceeding with build"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
   build:
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -70,7 +114,6 @@ jobs:
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'any'
           channel: 'stable'
           cache: true
 
@@ -116,5 +159,14 @@ jobs:
           body: |
             自动构建，包名已改为 `tv.danmaku.bili`
             上游版本：${{ steps.version.outputs.version }}
+            上游 SHA：${{ needs.check.outputs.upstream_sha }}
             ⚠️ 与官方哔哩哔哩包名相同，安装前请先卸载官方版本
           files: PiliPlus/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Save upstream SHA for next run
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "last-built-sha"
+          name: "last-built-sha"
+          body: ${{ needs.check.outputs.upstream_sha }}
+          prerelease: true
